@@ -1063,6 +1063,7 @@ Cost_Entry Expansion_Cost_Entry::get_median_entry() {
 
 /* returns the absolute delta_x and delta_y offset required to reach to_node from from_node */
 static void get_xy_deltas(const RRNodeId from_node, const RRNodeId to_node, int* delta_x, int* delta_y) {
+#if 0
     int from_x = 0;
     int from_y = 0;
     adjust_rr_position(from_node, from_x, from_y);
@@ -1073,6 +1074,72 @@ static void get_xy_deltas(const RRNodeId from_node, const RRNodeId to_node, int*
 
     *delta_x = to_x - from_x;
     *delta_y = to_y - from_y;
+#else
+    auto& device_ctx = g_vpr_ctx.device();
+
+    auto& from = device_ctx.rr_nodes[size_t(from_node)];
+    auto& to = device_ctx.rr_nodes[size_t(to_node)];
+
+    /* get chan/seg coordinates of the from/to nodes. seg coordinate is along the wire,
+     * chan coordinate is orthogonal to the wire */
+    int from_seg_low = from.xlow();
+    int from_seg_high = from.xhigh();
+    int from_chan = from.ylow();
+    int to_seg = to.xlow();
+    int to_chan = to.ylow();
+    if (from.type() == CHANY) {
+        from_seg_low = from.ylow();
+        from_seg_high = from.yhigh();
+        from_chan = from.xlow();
+        to_seg = to.ylow();
+        to_chan = to.xlow();
+    }
+
+    /* now we want to count the minimum number of *channel segments* between the from and to nodes */
+    int delta_seg, delta_chan;
+
+    /* orthogonal to wire */
+    int no_need_to_pass_by_clb = 0; //if we need orthogonal wires then we don't need to pass by the target CLB along the current wire direction
+    if (to_chan > from_chan + 1) {
+        /* above */
+        delta_chan = to_chan - from_chan;
+        no_need_to_pass_by_clb = 1;
+    } else if (to_chan < from_chan) {
+        /* below */
+        delta_chan = from_chan - to_chan + 1;
+        no_need_to_pass_by_clb = 1;
+    } else {
+        /* adjacent to current channel */
+        delta_chan = 0;
+        no_need_to_pass_by_clb = 0;
+    }
+
+    /* along same direction as wire. */
+    if (to_seg > from_seg_high) {
+        /* ahead */
+        delta_seg = to_seg - from_seg_high - no_need_to_pass_by_clb;
+    } else if (to_seg < from_seg_low) {
+        /* behind */
+        delta_seg = from_seg_low - to_seg - no_need_to_pass_by_clb;
+    } else {
+        /* along the span of the wire */
+        delta_seg = 0;
+    }
+
+    /* account for wire direction. lookahead map was computed by looking up and to the right starting at INC wires. for targets
+     * that are opposite of the wire direction, let's add 1 to delta_seg */
+    if ((from.type() == CHANX || from.type() == CHANY)
+        && ((to_seg < from_seg_low && from.direction() == INC_DIRECTION) || (to_seg > from_seg_high && from.direction() == DEC_DIRECTION))) {
+        delta_seg++;
+    }
+
+    *delta_x = delta_seg;
+    *delta_y = delta_chan;
+    if (from.type() == CHANY) {
+        *delta_x = delta_chan;
+        *delta_y = delta_seg;
+    }
+#endif
 }
 
 static void adjust_rr_position(const RRNodeId rr, int& x, int& y) {
