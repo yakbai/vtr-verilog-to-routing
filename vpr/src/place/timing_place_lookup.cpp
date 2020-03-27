@@ -221,20 +221,31 @@ std::vector<int> get_best_classes(enum e_pin_type pintype, t_physical_tile_type_
 
     std::vector<int> best_classes;
 
-    //Collect all classes of matching type which do not have all their pins ignored
+    //Record any zero Fc pins since we'll want to skip them
+    std::unordered_set<int> zero_fc_pins;
+    for (const t_fc_specification& fc_spec : type->fc_specs) {
+        if (fc_spec.fc_value != 0) continue;
+
+        zero_fc_pins.insert(fc_spec.pins.begin(), fc_spec.pins.end());
+    }
+
+    //Collect all classes of matching type which connect to general routing
     for (int i = 0; i < type->num_class; i++) {
         if (type->class_inf[i].type == pintype) {
-            bool all_ignored = true;
+            //Check whether all pins in this class are ignored or have zero fc
+            bool any_pins_connect_to_general_routing = false;
             for (int ipin = 0; ipin < type->class_inf[i].num_pins; ++ipin) {
                 int pin = type->class_inf[i].pinlist[ipin];
-                if (!type->is_ignored_pin[pin]) {
-                    all_ignored = false;
+                if (!type->is_ignored_pin[pin] && !zero_fc_pins.count(pin)) {
+                    any_pins_connect_to_general_routing = true;
                     break;
                 }
             }
-            if (!all_ignored) {
-                best_classes.push_back(i);
-            }
+
+            if (!any_pins_connect_to_general_routing) continue; //Skip if doesn't connect to general routing
+
+            //Record candidate class
+            best_classes.push_back(i);
         }
     }
 
